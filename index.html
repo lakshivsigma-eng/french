@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TEF Maîtrise - Expert Training</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #050505; color: white; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-in { animation: fadeIn 0.4s ease-out forwards; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+        
+        // Icons Component using Lucide
+        const Icon = ({ name, size = 24, className = "" }) => {
+            const [iconSvg, setIconSvg] = useState("");
+            useEffect(() => {
+                if (window.lucide) {
+                    const icon = window.lucide.icons[name];
+                    if (icon) {
+                        // Create a temporary element to get the SVG string
+                        const div = document.createElement('div');
+                        const svg = icon.toSvg({ size, class: className });
+                        setIconSvg(svg);
+                    }
+                }
+            }, [name, size, className]);
+            return <span dangerouslySetInnerHTML={{ __html: iconSvg }} />;
+        };
+
+        const apiKey = ""; 
+
+        const MOCK_EXAM = [
+            { 
+                type: 'reading', 
+                text: "L'ubiquité des algorithmes dans la sphère publique soulève des interrogations épistémologiques quant à la neutralité de l'information. Bien que présentés comme de simples vecteurs techniques, ils agissent en réalité comme des filtres cognitifs façonnant notre perception du réel.", 
+                question: "Quelle est l'idée principale de ce texte ?", 
+                options: [
+                    "Les algorithmes sont des outils purement techniques et impartiaux.",
+                    "La neutralité algorithmique est un mythe qui influence notre cognition.",
+                    "L'information numérique est devenue inaccessible au grand public.",
+                    "Le filtrage des données est nécessaire à la survie de la démocratie."
+                ], 
+                correct: 1 
+            },
+            { 
+                type: 'reading', 
+                text: "Malgré les velléités de réforme, l'inertie administrative semble avoir eu raison de l'enthousiasme initial des acteurs de terrain, reléguant le projet au rang des vains espoirs déçus.", 
+                question: "Que signifie 'avoir eu raison de' dans ce contexte ?", 
+                options: [
+                    "Avoir soutenu efficacement.",
+                    "Avoir donné une explication logique.",
+                    "Avoir triomphé ou causé l'échec de.",
+                    "Avoir entamé une négociation."
+                ], 
+                correct: 2 
+            },
+            { 
+                type: 'audio', 
+                text: "Si j'eusse su que les circonstances eussent été si peu clémentes, j'eusse sans doute différé mon départ.", 
+                question: "Quelle forme verbale est principalement utilisée ici pour exprimer le regret ?", 
+                options: ["Futur simple", "Passé composé", "Plus-que-parfait du subjonctif", "Imparfait"], 
+                correct: 2 
+            },
+            { 
+                type: 'speaking', 
+                text: "Sujet : La protection de l'environnement doit-elle primer sur la croissance économique, quel qu'en soit le prix social ?", 
+                question: "Exposez vos arguments de manière structurée (C1/C2 attendu).",
+                correct: null 
+            }
+        ];
+
+        const QUIZ_CHALLENGES = [
+            { type: 'audio', text: "Où se trouve la boulangerie la plus proche ?", question: "Choisissez la réponse logique :", options: ["Au coin de la rue", "À midi pile", "Rouge et grand"], correct: 0 }
+        ];
+
+        function App() {
+            const [activeTab, setActiveTab] = useState('Examen'); 
+            const [isSpeaking, setIsSpeaking] = useState(false);
+            const [quizState, setQuizState] = useState('idle'); 
+            const [quizIndex, setQuizIndex] = useState(0);
+            const [quizScore, setQuizScore] = useState(0);
+            const [quizFeedback, setQuizFeedback] = useState(null);
+
+            const [isRecording, setIsRecording] = useState(false);
+            const [transcript, setTranscript] = useState("");
+            const [isAnalyzingSpeech, setIsAnalyzingSpeech] = useState(false);
+            const [speechFeedback, setSpeechFeedback] = useState(null);
+            const recognitionRef = useRef(null);
+
+            const [writingInput, setWritingInput] = useState("");
+            const [isAnalyzingWriting, setIsAnalyzingWriting] = useState(false);
+            const [writingFeedback, setWritingFeedback] = useState(null);
+
+            const [messages, setMessages] = useState([{ role: 'assistant', content: 'Bonjour ! Je suis votre tuteur expert TEF. Je vais être très strict aujourd\'hui pour vous aider à atteindre le niveau C2.' }]);
+            const [userInput, setUserInput] = useState("");
+            const [isTyping, setIsTyping] = useState(false);
+
+            useEffect(() => {
+                setQuizState('idle');
+                setQuizIndex(0);
+                setQuizScore(0);
+                setQuizFeedback(null);
+                setSpeechFeedback(null);
+                setTranscript("");
+            }, [activeTab]);
+
+            useEffect(() => {
+                const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                if (SpeechRecognition) {
+                    recognitionRef.current = new SpeechRecognition();
+                    recognitionRef.current.continuous = true;
+                    recognitionRef.current.interimResults = true;
+                    recognitionRef.current.lang = 'fr-FR';
+                    
+                    recognitionRef.current.onresult = (event) => {
+                        let currentTranscript = "";
+                        for (let i = 0; i < event.results.length; i++) {
+                            currentTranscript += event.results[i][0].transcript;
+                        }
+                        setTranscript(currentTranscript);
+                    };
+                    recognitionRef.current.onend = () => setIsRecording(false);
+                }
+            }, []);
+
+            const speakText = async (text) => {
+                if (!text || isSpeaking) return;
+                setIsSpeaking(true);
+                try {
+                    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${apiKey}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            contents: [{ parts: [{ text }] }],
+                            generationConfig: {
+                                responseModalities: ["AUDIO"],
+                                speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: "Aoede" } } }
+                            },
+                            model: "gemini-2.5-flash-preview-tts"
+                        })
+                    });
+                    const data = await response.json();
+                    const pcmBase64 = data.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+                    if (pcmBase64) {
+                        const audioBlob = pcmToWav(pcmBase64, 24000);
+                        const audio = new Audio(URL.createObjectURL(audioBlob));
+                        audio.onended = () => setIsSpeaking(false);
+                        await audio.play();
+                    } else { setIsSpeaking(false); }
+                } catch { setIsSpeaking(false); }
+            };
+
+            const pcmToWav = (base64Pcm, sampleRate) => {
+                const pcmData = Uint8Array.from(atob(base64Pcm), c => c.charCodeAt(0));
+                const buffer = new ArrayBuffer(44 + pcmData.length);
+                const view = new DataView(buffer);
+                const writeString = (pos, str) => { for (let i = 0; i < str.length; i++) view.setUint8(pos + i, str.charCodeAt(i)); };
+                writeString(0, 'RIFF'); view.setUint32(4, 36 + pcmData.length, true); writeString(8, 'WAVE'); writeString(12, 'fmt ');
+                view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true); view.setUint32(24, sampleRate, true);
+                view.setUint32(28, sampleRate * 2, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true); writeString(36, 'data');
+                view.setUint32(40, pcmData.length, true); new Uint8Array(buffer, 44).set(pcmData);
+                return new Blob([buffer], { type: 'audio/wav' });
+            };
+
+            const handleAnalyzeWriting = async () => {
+                if (!writingInput.trim()) return;
+                setIsAnalyzingWriting(true);
+                try {
+                    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            contents: [{ parts: [{ text: `Evaluate this French text for TEF Canada: "${writingInput}". 
+                            STRICTNESS PROTOCOL:
+                            - A1: Greeting/Single words. (e.g. "Bonjour")
+                            - A2/B1: Simple sentences, common verbs.
+                            - B2: Clear arguments, some connectors.
+                            - C1/C2: Required: complex syntax (subjunctive, past anterior, conditional), formal vocabulary (soutenu), diverse logical connectors (nonobstant, par ailleurs), and thematic depth.
+                            If the input is just a greeting or short sentence, do NOT give C2.
+                            Return JSON: {level: string, feedback: string, suggestionForC2: string}` }] }],
+                            generationConfig: { responseMimeType: "application/json" }
+                        })
+                    });
+                    const data = await response.json();
+                    setWritingFeedback(JSON.parse(data.candidates[0].content.parts[0].text));
+                } catch (e) {
+                    setWritingFeedback({ level: "Erreur", feedback: "Échec de l'analyse." });
+                } finally {
+                    setIsAnalyzingWriting(false);
+                }
+            };
+
+            const handleAnalyzeSpeech = async () => {
+                if (!transcript.trim()) return;
+                setIsAnalyzingSpeech(true);
+                try {
+                    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            contents: [{ parts: [{ text: `Evaluate this French transcript: "${transcript}".
+                            STRICTNESS PROTOCOL:
+                            - If the user says "Bonjour" or basic greetings, rank as A1. 
+                            - To reach C1/C2, the transcript MUST show: 
+                                1. Advanced rhetoric (nuance, hypothetical reasoning).
+                                2. High-level grammar (si clauses, subjunctive mood).
+                                3. Formal register (soutenu).
+                            - Be brutally honest. If they don't demonstrate mastery, keep them in B range.
+                            Return JSON: {level: string, feedback: string, missingSkills: string[]}` }] }],
+                            generationConfig: { responseMimeType: "application/json" }
+                        })
+                    });
+                    const data = await response.json();
+                    setSpeechFeedback(JSON.parse(data.candidates[0].content.parts[0].text));
+                } catch (e) {
+                    setSpeechFeedback({ level: "N/A", feedback: "Erreur technique." });
+                } finally {
+                    setIsAnalyzingSpeech(false);
+                }
+            };
+
+            const handleSendMessage = async () => {
+                if (!userInput.trim()) return;
+                const newMsgs = [...messages, { role: 'user', content: userInput }];
+                setMessages(newMsgs);
+                setUserInput("");
+                setIsTyping(true);
+
+                try {
+                    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            contents: newMsgs.map(m => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }] })),
+                            systemInstruction: { parts: [{ text: "Tu es un tuteur expert TEF Canada. Sois très exigeant. Si l'utilisateur parle simplement, corrige-le en lui montrant comment dire la même chose au niveau C2." }] }
+                        })
+                    });
+                    const data = await response.json();
+                    setMessages(m => [...m, { role: 'assistant', content: data.candidates[0].content.parts[0].text }]);
+                } catch {
+                    setMessages(m => [...m, { role: 'assistant', content: "Erreur." }]);
+                } finally {
+                    setIsTyping(false);
+                }
+            };
+
+            const toggleRecording = () => {
+                if (isRecording) {
+                    recognitionRef.current.stop();
+                } else {
+                    setTranscript("");
+                    setSpeechFeedback(null);
+                    recognitionRef.current.start();
+                    setIsRecording(true);
+                }
+            };
+
+            const currentQuestions = activeTab === 'Examen' ? MOCK_EXAM : QUIZ_CHALLENGES;
+            const currentQuestion = currentQuestions[quizIndex];
+
+            return (
+                <div className="h-screen bg-[#050505] text-white font-sans flex flex-col overflow-hidden">
+                    <nav className="h-16 border-b border-white/5 bg-[#0a0a0a] px-6 flex items-center justify-between z-50">
+                        <div className="flex items-center gap-3">
+                            <div className="flex gap-1">
+                                <div className="w-1.5 h-5 bg-blue-600 rounded-full"></div>
+                                <div className="w-1.5 h-5 bg-white rounded-full"></div>
+                                <div className="w-1.5 h-5 bg-red-500 rounded-full"></div>
+                            </div>
+                            <span className="font-black text-sm tracking-tighter uppercase italic">TEF Maîtrise</span>
+                        </div>
+                        <div className="flex gap-4 md:gap-8 items-center">
+                            {['Examen', 'Quiz', 'Speaking', 'Workshop', 'Tuteur'].map(tab => (
+                                <button key={tab} onClick={() => setActiveTab(tab)} className={`text-[10px] font-black uppercase tracking-widest ${activeTab === tab ? 'text-blue-500 underline underline-offset-8 decoration-2' : 'text-zinc-500 hover:text-white'}`}>
+                                    {tab}
+                                </button>
+                            ))}
+                        </div>
+                    </nav>
+
+                    <main className="flex-1 overflow-y-auto p-4 md:p-8">
+                        <div className="max-w-2xl mx-auto">
+                            
+                            {activeTab === 'Examen' && (
+                                <div className="animate-in space-y-6">
+                                    {quizState === 'idle' ? (
+                                        <div className="text-center py-20 space-y-6">
+                                            <h1 className="text-6xl font-black uppercase italic tracking-tighter">Prêt pour le C2?</h1>
+                                            <button onClick={() => setQuizState('active')} className="px-10 py-4 bg-white text-black font-black uppercase rounded-full hover:bg-red-600 hover:text-white transition-all">Commencer</button>
+                                        </div>
+                                    ) : (
+                                        <div className="bg-zinc-900 border border-white/10 rounded-[2.5rem] p-10 space-y-6 shadow-2xl">
+                                            <p className="text-sm font-black uppercase text-zinc-500 tracking-widest">{currentQuestion?.type}</p>
+                                            <div className="p-6 bg-black/40 rounded-2xl border border-white/5 italic text-lg leading-relaxed">
+                                                {currentQuestion?.text}
+                                            </div>
+                                            {currentQuestion?.type === 'audio' && (
+                                                <button onClick={() => speakText(currentQuestion.text)} className="w-16 h-16 bg-blue-600 rounded-full flex items-center justify-center mx-auto text-white flex items-center justify-center">
+                                                    <Icon name="Volume2" />
+                                                </button>
+                                            )}
+                                            <div className="grid gap-2">
+                                                {currentQuestion?.options?.map((opt, i) => (
+                                                    <button key={i} onClick={() => {
+                                                        if (i === currentQuestion.correct) setQuizScore(s => s+1);
+                                                        if (quizIndex < currentQuestions.length - 1) setQuizIndex(i => i+1);
+                                                        else setQuizState('finished');
+                                                    }} className="p-5 bg-zinc-800 rounded-xl text-left hover:bg-zinc-700 transition-all font-bold">{opt}</button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {activeTab === 'Speaking' && (
+                                <div className="animate-in flex flex-col items-center justify-center py-12 space-y-8 text-center">
+                                    <h1 className="text-5xl font-black italic uppercase tracking-tighter">Analyseur de Niveau</h1>
+                                    <p className="text-zinc-500 max-w-sm italic">"Parlez maintenant. L'IA sera extrêmement sévère."</p>
+                                    
+                                    <button 
+                                        onClick={toggleRecording}
+                                        className={`w-32 h-32 rounded-full flex items-center justify-center transition-all ${isRecording ? 'bg-red-600 animate-pulse text-white' : 'bg-zinc-900 border border-white/10 text-white'}`}
+                                    >
+                                        {isRecording ? <Icon name="X" size={40} /> : <Icon name="Mic" size={40} className="text-blue-500" />}
+                                    </button>
+
+                                    <div className="w-full bg-zinc-900/50 border border-white/5 p-8 rounded-[2rem] min-h-[100px] text-lg italic text-zinc-400">
+                                        {transcript || "En attente..."}
+                                    </div>
+
+                                    {transcript && !isRecording && (
+                                        <button onClick={handleAnalyzeSpeech} disabled={isAnalyzingSpeech} className="px-8 py-3 bg-blue-600 rounded-full font-black uppercase text-xs flex items-center gap-2">
+                                            {isAnalyzingSpeech ? <Icon name="Loader2" className="animate-spin" /> : <Icon name="Activity" />}
+                                            Analyser le niveau réel
+                                        </button>
+                                    )}
+
+                                    {speechFeedback && (
+                                        <div className="w-full bg-zinc-900 border border-white/5 rounded-[2rem] p-8 space-y-4 animate-in">
+                                            <div className="flex justify-between items-center">
+                                                <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500 underline decoration-blue-500">Verdict de Maîtrise</span>
+                                                <div className={`px-4 py-1 rounded-full text-xs font-black uppercase ${speechFeedback.level.includes('C') ? 'bg-green-600' : 'bg-red-600'}`}>
+                                                    {speechFeedback.level}
+                                                </div>
+                                            </div>
+                                            <p className="text-left text-zinc-300 italic leading-relaxed">"{speechFeedback.feedback}"</p>
+                                            {speechFeedback.missingSkills && (
+                                                <div className="text-left pt-4 border-t border-white/5">
+                                                    <p className="text-[10px] font-black uppercase text-zinc-500 mb-2">Compétences C2 manquantes :</p>
+                                                    <div className="flex flex-wrap gap-2">
+                                                        {speechFeedback.missingSkills.map((s, i) => (
+                                                            <span key={i} className="text-[10px] bg-white/5 px-2 py-1 rounded border border-white/10">{s}</span>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {activeTab === 'Workshop' && (
+                                <div className="animate-in space-y-6 py-4">
+                                    <div className="bg-zinc-900/50 p-6 rounded-[2rem] border border-white/5">
+                                        <p className="text-sm font-bold italic text-blue-400">Défi : Rédigez une critique socio-politique sur l'impact de la technologie.</p>
+                                    </div>
+                                    <textarea 
+                                        value={writingInput}
+                                        onChange={(e) => setWritingInput(e.target.value)}
+                                        placeholder="Rédigez ici (le niveau A1-B2 sera rejeté pour le C2)..."
+                                        className="w-full h-64 bg-zinc-900 border border-white/5 rounded-[2rem] p-8 text-lg focus:outline-none focus:border-blue-500 text-white"
+                                    />
+                                    <button onClick={handleAnalyzeWriting} disabled={isAnalyzingWriting} className="w-full py-5 bg-white text-black rounded-2xl font-black uppercase tracking-widest hover:bg-blue-600 transition-all">
+                                        {isAnalyzingWriting ? "Analyse Rigoureuse..." : "Soumettre pour Validation C2"}
+                                    </button>
+                                    {writingFeedback && (
+                                        <div className="bg-zinc-900 border border-white/5 rounded-[2rem] p-8 space-y-4">
+                                            <div className="text-2xl font-black italic text-blue-500">NIVEAU : {writingFeedback.level}</div>
+                                            <p className="text-zinc-400 italic">"{writingFeedback.feedback}"</p>
+                                            <p className="text-xs text-zinc-500 border-t border-white/5 pt-4 font-bold">Conseil C2 : {writingFeedback.suggestionForC2}</p>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {activeTab === 'Tuteur' && (
+                                <div className="flex flex-col h-[70vh] bg-zinc-900/50 border border-white/5 rounded-[2rem] overflow-hidden">
+                                    <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                                        {messages.map((m, i) => (
+                                            <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                                                <div className={`max-w-[80%] p-4 rounded-2xl text-sm ${m.role === 'user' ? 'bg-blue-600' : 'bg-white/5 border border-white/10'}`}>
+                                                    {m.content}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <div className="p-4 bg-black flex gap-2">
+                                        <input className="flex-1 bg-zinc-900 rounded-xl px-4 text-white outline-none" value={userInput} onChange={e => setUserInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSendMessage()} />
+                                        <button onClick={handleSendMessage} className="bg-blue-600 p-3 rounded-xl text-white">
+                                            <Icon name="Send" size={18} />
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+
+                        </div>
+                    </main>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
